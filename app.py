@@ -64,8 +64,8 @@ if prompt := st.chat_input("Escribe o responde la llamada aquí..."):
         historial_prompt = [f"{m['role']}: {m['content']}" for m in st.session_state.messages]
         prompt_completo = f"{prompt_sistema}\n\nHistorial de la llamada:\n" + "\n".join(historial_prompt)
         
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
+response = client.models.generate_content(
+            model='gemini-1.5-flash',
             contents=prompt_completo
         )
         
