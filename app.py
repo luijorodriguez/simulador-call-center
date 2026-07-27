@@ -35,7 +35,7 @@ if not api_key:
 prompt_sistema = f"""
 Eres un participante en un simulador de entrenamiento para un call center.
 Tu rol actual es: {rol_ia}.
-Debes seguir strictly las siguientes políticas y contexto de la empresa:
+Debes seguir estrictamente las siguientes políticas y contexto de la empresa:
 ---
 {manual_context}
 ---
@@ -64,7 +64,7 @@ if prompt := st.chat_input("Escribe o responde la llamada aquí..."):
         historial_prompt = [f"{m['role']}: {m['content']}" for m in st.session_state.messages]
         prompt_completo = f"{prompt_sistema}\n\nHistorial de la llamada:\n" + "\n".join(historial_prompt)
         
-response = client.models.generate_content(
+        response = client.models.generate_content(
             model='gemini-1.5-flash',
             contents=prompt_completo
         )
