@@ -14,11 +14,6 @@ with st.sidebar:
     api_key_input = st.text_input("Google Gemini API Key:", type="password")
     api_key = api_key_input.strip() if api_key_input else ""
     
-    modelo_gemini = st.selectbox(
-        "Modelo de Gemini:",
-        ["gemini-2.0-flash", "gemini-1.5-flash"]
-    )
-    
     rol_ia = st.selectbox("Rol de la IA:", ["Cliente (Usuario es Operador)", "Operador (Usuario es Cliente)"])
     
     st.markdown("---")
@@ -57,7 +52,7 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Entrada de texto/voz del usuario
+# Entrada de texto del usuario
 if prompt := st.chat_input("Escribe o responde la llamada aquí..."):
     # Guardar mensaje del usuario
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -72,18 +67,16 @@ if prompt := st.chat_input("Escribe o responde la llamada aquí..."):
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model=modelo_gemini,
+                model='gemini-2.0-flash',
                 contents=prompt_completo
             )
             
             respuesta_ia = response.text
             st.markdown(respuesta_ia)
-            # Guardar en historial solo si tuvo éxito
             st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
             
         except Exception as e:
             st.error(f"❌ Error al conectar con Gemini:\n\n`{e}`")
-            st.info("👉 Prueba lo siguiente: Revisa tu API Key o cambia la opción 'Modelo de Gemini' en la barra izquierda a gemini-2.0-flash o gemini-2.5-flash.")
 
 # Botón para colgar y reiniciar
 if st.button("🔴 Finalizar y Evaluar Llamada"):
