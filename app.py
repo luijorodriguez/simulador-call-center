@@ -16,7 +16,7 @@ with st.sidebar:
     
     modelo_gemini = st.selectbox(
         "Modelo de Gemini:",
-        ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        ["gemini-2.0-flash", "gemini-1.5-flash"]
     )
     
     rol_ia = st.selectbox("Rol de la IA:", ["Cliente (Usuario es Operador)", "Operador (Usuario es Cliente)"])
