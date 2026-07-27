@@ -10,7 +10,14 @@ st.caption("Entorno de práctica interactivo impulsado por IA")
 # Sidebar - Configuración y Base de Conocimiento
 with st.sidebar:
     st.header("⚙️ Configuración del Simulador")
-    api_key = st.text_input("Google Gemini API Key:", type="password")
+    
+    api_key_input = st.text_input("Google Gemini API Key:", type="password")
+    api_key = api_key_input.strip() if api_key_input else ""
+    
+    modelo_gemini = st.selectbox(
+        "Modelo de Gemini:",
+        ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    )
     
     rol_ia = st.selectbox("Rol de la IA:", ["Cliente (Usuario es Operador)", "Operador (Usuario es Cliente)"])
     
@@ -45,8 +52,6 @@ Instrucciones:
 3. Mantén la simulación activa hasta que el usuario decida colgar.
 """
 
-client = genai.Client(api_key=api_key)
-
 # Mostrar historial de la llamada
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
@@ -64,16 +69,21 @@ if prompt := st.chat_input("Escribe o responde la llamada aquí..."):
         historial_prompt = [f"{m['role']}: {m['content']}" for m in st.session_state.messages]
         prompt_completo = f"{prompt_sistema}\n\nHistorial de la llamada:\n" + "\n".join(historial_prompt)
         
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=prompt_completo
-        )
-        
-        respuesta_ia = response.text
-        st.markdown(respuesta_ia)
-        
-    # Guardar respuesta de la IA
-    st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=modelo_gemini,
+                contents=prompt_completo
+            )
+            
+            respuesta_ia = response.text
+            st.markdown(respuesta_ia)
+            # Guardar en historial solo si tuvo éxito
+            st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
+            
+        except Exception as e:
+            st.error(f"❌ Error al conectar con Gemini:\n\n`{e}`")
+            st.info("👉 Prueba lo siguiente: Revisa tu API Key o cambia la opción 'Modelo de Gemini' en la barra izquierda a gemini-2.0-flash o gemini-2.5-flash.")
 
 # Botón para colgar y reiniciar
 if st.button("🔴 Finalizar y Evaluar Llamada"):
