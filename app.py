@@ -4,6 +4,7 @@ from gtts import gTTS
 import io
 import json
 import urllib.request
+import speech_recognition as sr
 from audio_recorder_streamlit import audio_recorder
 
 # Configuración de la página
@@ -12,7 +13,23 @@ st.set_page_config(page_title="Simulador de Call Center por Voz", page_icon="�
 st.title("🎙️ Simulador de Llamadas de Voz (Entrenamiento)")
 st.caption("Habla por el micrófono para simular la llamada telefónica en tiempo real.")
 
-# Función que consulta la lista de modelos GRATUITOS oficiales en vivo
+# Función para transcribir voz a texto de forma gratuita
+def transcribir_audio(audio_bytes):
+    r = sr.Recognizer()
+    audio_file = io.BytesIO(audio_bytes)
+    try:
+        with sr.AudioFile(audio_file) as source:
+            audio_data = r.record(source)
+            texto = r.recognize_google(audio_data, language="es-ES")
+            return texto
+    except sr.UnknownValueError:
+        st.warning("⚠️ No se entendió el audio. Intenta hablar más claro o cerca del micrófono.")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error procesando el audio: {e}")
+        return None
+
+# Función que consulta la lista de modelos GRATUITOS en vivo
 @st.cache_data(ttl=3600)
 def obtener_modelos_gratuitos_en_vivo():
     try:
@@ -23,16 +40,12 @@ def obtener_modelos_gratuitos_en_vivo():
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode())
             data_list = data.get("data", [])
-            
-            # Extraer solo los modelos que terminan exactamente en ':free'
             modelos_free = [item["id"] for item in data_list if item.get("id", "").endswith(":free")]
-            
             if modelos_free:
                 return modelos_free
     except Exception:
         pass
     
-    # Respaldo en caso de fallo de conexión
     return [
         "meta-llama/llama-3.1-8b-instruct:free",
         "mistralai/mistral-7b-instruct:free",
@@ -59,7 +72,6 @@ if not api_key:
     st.info("💡 Ingresa tu OpenRouter API Key en el panel izquierdo. Es gratuita en openrouter.ai")
     st.stop()
 
-# Cliente OpenRouter
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=api_key,
@@ -82,6 +94,7 @@ Instrucciones críticas:
 3. No uses texto entre paréntesis ni acotaciones como (suspirando) o [molesto].
 """
 
+# Mostrar historial
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
@@ -96,13 +109,15 @@ audio_bytes = audio_recorder(
     icon_size="2x"
 )
 
-# Entrada por texto alternativa
 prompt_texto = st.chat_input("O escribe tu mensaje aquí...")
 
 input_usuario = None
 
-if audio_bytes:
-    input_usuario = "Hola, buenas tardes, me comunico del centro de atención al cliente."
+# Procesar audio real solo si es una grabación nueva
+if audio_bytes and ("last_audio" not in st.session_state or st.session_state.last_audio != audio_bytes):
+    st.session_state.last_audio = audio_bytes
+    with st.spinner("🎙️ Transcribiendo tu voz..."):
+        input_usuario = transcribir_audio(audio_bytes)
 
 if prompt_texto:
     input_usuario = prompt_texto
@@ -117,11 +132,8 @@ if input_usuario:
         for m in st.session_state.messages:
             historial.append({"role": m["role"], "content": m["content"]})
 
-        # Consulta dinámica de modelos activos en vivo
         modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
-
         respuesta_ia = None
-        errores_detalle = []
 
         for modelo in modelos_gratuitos:
             try:
@@ -132,14 +144,13 @@ if input_usuario:
                 respuesta_ia = chat_completion.choices[0].message.content
                 if respuesta_ia:
                     break
-            except Exception as e:
-                errores_detalle.append(f"• `{modelo}`: {e}")
+            except Exception:
                 continue
 
         if respuesta_ia:
             st.markdown(respuesta_ia)
 
-            # Convertir texto a voz hablada
+            # Convertir respuesta a voz y reproducir
             tts = gTTS(text=respuesta_ia, lang='es')
             audio_fp = io.BytesIO()
             tts.write_to_fp(audio_fp)
@@ -148,10 +159,10 @@ if input_usuario:
             st.audio(audio_fp, format='audio/mp3', autoplay=True)
             st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
         else:
-            st.error("❌ No se pudo conectar con los modelos de OpenRouter. Detalle:")
-            for err in errores_detalle[:3]:
-                st.write(err)
+            st.error("❌ No se pudo obtener respuesta de los modelos gratuitos.")
 
 if st.button("🔴 Finalizar y Reiniciar Llamada"):
     st.session_state.messages = []
+    if "last_audio" in st.session_state:
+        del st.session_state["last_audio"]
     st.rerun()
