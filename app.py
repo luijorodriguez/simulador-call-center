@@ -8,12 +8,20 @@ import speech_recognition as sr
 from audio_recorder_streamlit import audio_recorder
 
 # Configuración de la página
-st.set_page_config(page_title="Simulador de Call Center por Voz", page_icon="🎙️", layout="centered")
+st.set_page_config(page_title="Simulador de Call Center con Evaluación", page_icon="📞", layout="centered")
 
-st.title("🎙️ Simulador de Llamadas de Voz (Entrenamiento)")
-st.caption("Habla por el micrófono para simular la llamada telefónica en tiempo real.")
+st.title("📞 Simulador de Llamadas de Entrenamiento")
+st.caption("Entorno interactivo por voz con auditoría de desempeño en tiempo real.")
 
-# Función para transcribir voz a texto de forma gratuita
+# Inicializar estados de la sesión
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "evaluado" not in st.session_state:
+    st.session_state.evaluado = False
+if "evaluacion_texto" not in st.session_state:
+    st.session_state.evaluacion_texto = ""
+
+# Función para transcribir voz a texto
 def transcribir_audio(audio_bytes):
     r = sr.Recognizer()
     audio_file = io.BytesIO(audio_bytes)
@@ -65,9 +73,6 @@ with st.sidebar:
         height=180
     )
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
 if not api_key:
     st.info("💡 Ingresa tu OpenRouter API Key en el panel izquierdo. Es gratuita en openrouter.ai")
     st.stop()
@@ -84,85 +89,155 @@ client = OpenAI(
 prompt_sistema = f"""
 Eres un participante en un simulador de entrenamiento para un call center telefónico.
 Tu rol actual es: {rol_ia}.
-Debes seguir estrictamente este contexto y manual:
+Debes seguir strictly este contexto y manual:
 ---
 {manual_context}
 ---
 Instrucciones críticas:
 1. Habla de forma natural e hiperrealista, acorde a tu rol.
 2. Mantén tus respuestas MUY BREVES (máximo 1 a 2 oraciones sencillas), para que la conversación fluya como una llamada real.
-3. No uses texto entre paréntesis ni acotaciones como (suspirando) o [molesto].
+3. No uses texto entre paréntesis ni acotaciones.
 """
 
-# Mostrar historial
+# Mostrar historial de la llamada
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-st.markdown("---")
-st.write("👇 **Toca el micrófono para hablar y vuelve a tocarlo para detenerte:**")
+# ---------------------------------------------------------
+# MODO 1: LLAMADA EN CURSO (SI AÚN NO SE HA EVALUADO)
+# ---------------------------------------------------------
+if not st.session_state.evaluado:
+    st.markdown("---")
+    st.write("👇 **Toca el micrófono para hablar y vuelve a tocarlo para detenerte:**")
 
-audio_bytes = audio_recorder(
-    text="Presiona para Grabar",
-    recording_color="#e8b62c",
-    neutral_color="#6aa36f",
-    icon_size="2x"
-)
+    audio_bytes = audio_recorder(
+        text="Presiona para Grabar",
+        recording_color="#e8b62c",
+        neutral_color="#6aa36f",
+        icon_size="2x"
+    )
 
-prompt_texto = st.chat_input("O escribe tu mensaje aquí...")
+    prompt_texto = st.chat_input("O escribe tu mensaje aquí...")
 
-input_usuario = None
+    input_usuario = None
 
-# Procesar audio real solo si es una grabación nueva
-if audio_bytes and ("last_audio" not in st.session_state or st.session_state.last_audio != audio_bytes):
-    st.session_state.last_audio = audio_bytes
-    with st.spinner("🎙️ Transcribiendo tu voz..."):
-        input_usuario = transcribir_audio(audio_bytes)
+    if audio_bytes and ("last_audio" not in st.session_state or st.session_state.last_audio != audio_bytes):
+        st.session_state.last_audio = audio_bytes
+        with st.spinner("🎙️ Transcribiendo tu voz..."):
+            input_usuario = transcribir_audio(audio_bytes)
 
-if prompt_texto:
-    input_usuario = prompt_texto
+    if prompt_texto:
+        input_usuario = prompt_texto
 
-if input_usuario:
-    st.session_state.messages.append({"role": "user", "content": input_usuario})
-    with st.chat_message("user"):
-        st.markdown(input_usuario)
+    if input_usuario:
+        st.session_state.messages.append({"role": "user", "content": input_usuario})
+        with st.chat_message("user"):
+            st.markdown(input_usuario)
 
-    with st.chat_message("assistant"):
-        historial = [{"role": "system", "content": prompt_sistema}]
-        for m in st.session_state.messages:
-            historial.append({"role": m["role"], "content": m["content"]})
+        with st.chat_message("assistant"):
+            historial = [{"role": "system", "content": prompt_sistema}]
+            for m in st.session_state.messages:
+                historial.append({"role": m["role"], "content": m["content"]})
 
-        modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
-        respuesta_ia = None
+            modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
+            respuesta_ia = None
 
-        for modelo in modelos_gratuitos:
-            try:
-                chat_completion = client.chat.completions.create(
-                    model=modelo,
-                    messages=historial,
-                )
-                respuesta_ia = chat_completion.choices[0].message.content
-                if respuesta_ia:
-                    break
-            except Exception:
-                continue
+            for modelo in modelos_gratuitos:
+                try:
+                    chat_completion = client.chat.completions.create(
+                        model=modelo,
+                        messages=historial,
+                    )
+                    respuesta_ia = chat_completion.choices[0].message.content
+                    if respuesta_ia:
+                        break
+                except Exception:
+                    continue
 
-        if respuesta_ia:
-            st.markdown(respuesta_ia)
+            if respuesta_ia:
+                st.markdown(respuesta_ia)
 
-            # Convertir respuesta a voz y reproducir
-            tts = gTTS(text=respuesta_ia, lang='es')
-            audio_fp = io.BytesIO()
-            tts.write_to_fp(audio_fp)
-            audio_fp.seek(0)
+                tts = gTTS(text=respuesta_ia, lang='es')
+                audio_fp = io.BytesIO()
+                tts.write_to_fp(audio_fp)
+                audio_fp.seek(0)
 
-            st.audio(audio_fp, format='audio/mp3', autoplay=True)
-            st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
+                st.audio(audio_fp, format='audio/mp3', autoplay=True)
+                st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
+
+    st.markdown("---")
+    # BOTÓN PARA FINALIZAR Y EVALUAR
+    if st.button("🔴 Finalizar Llamada y Evaluar Desempeño", use_container_width=True):
+        if len(st.session_state.messages) < 2:
+            st.warning("⚠️ Debes interactuar en la llamada antes de solicitar una evaluación.")
         else:
-            st.error("❌ No se pudo obtener respuesta de los modelos gratuitos.")
+            with st.spinner("📊 Auditando la gestión con la Base de Conocimiento..."):
+                # Transcripción completa de la llamada
+                transcripcion = ""
+                for msg in st.session_state.messages:
+                    rol = "OPERADOR" if msg["role"] == "user" else "CLIENTE"
+                    transcripcion += f"{rol}: {msg['content']}\n"
 
-if st.button("🔴 Finalizar y Reiniciar Llamada"):
-    st.session_state.messages = []
-    if "last_audio" in st.session_state:
-        del st.session_state["last_audio"]
-    st.rerun()
+                prompt_evaluacion = f"""
+                Eres un Auditor de Calidad Senior de Call Center.
+                Evalúa la siguiente llamada entre el Operador y el Cliente basándote estrictamente en estas políticas y manuales de la empresa:
+                
+                MANUAL Y POLÍTICAS DE LA EMPRESA:
+                ---
+                {manual_context}
+                ---
+                
+                TRANSCRIPCIÓN COMPLETA DE LA LLAMADA:
+                ---
+                {transcripcion}
+                ---
+                
+                Proporciona un reporte estructurado y pedagógico en español con los siguientes puntos:
+                1. 🏆 **Puntuación General:** (Calificación del 1 al 10).
+                2. ✅ **Aciertos del Operador:** (Cosas que hizo muy bien según el procedimiento).
+                3. ⚠️ **Oportunidades de Mejora:** (Errores, fallas de protocolo o tono a corregir).
+                4. 📋 **Cumplimiento de Protocolo:** (¿Validó identidad? ¿Mostró empatía? ¿Aplicó correctamente el reembolso o política?).
+                5. 💡 **Consejo Práctico:** (Una recomendación directa para la próxima llamada).
+                """
+
+                modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
+                evaluacion_res = None
+
+                for modelo in modelos_gratuitos:
+                    try:
+                        res = client.chat.completions.create(
+                            model=modelo,
+                            messages=[{"role": "user", "content": prompt_evaluacion}],
+                        )
+                        evaluacion_res = res.choices[0].message.content
+                        if evaluacion_res:
+                            break
+                    except Exception:
+                        continue
+
+                if evaluacion_res:
+                    st.session_state.evaluacion_texto = evaluacion_res
+                    st.session_state.evaluado = True
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo procesar la evaluación. Inténtalo de nuevo.")
+
+# ---------------------------------------------------------
+# MODO 2: REPORTE DE EVALUACIÓN Y NUEVA GESTIÓN
+# ---------------------------------------------------------
+else:
+    st.markdown("---")
+    st.subheader("📊 Reporte de Auditoría y Evaluación de Calidad")
+    
+    st.info(st.session_state.evaluacion_texto)
+
+    st.markdown("---")
+    # BOTÓN PARA REINICIAR Y NUEVA GESTIÓN
+    if st.button("🔄 Iniciar Nueva Gestión", type="primary", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.evaluado = False
+        st.session_state.evaluacion_texto = ""
+        if "last_audio" in st.session_state:
+            del st.session_state["last_audio"]
+        st.rerun()
