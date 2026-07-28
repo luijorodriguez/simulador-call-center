@@ -1,4 +1,4 @@
 streamlit
-groq
+openai
 gtts
 audio-recorder-streamlit
