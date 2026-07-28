@@ -88,12 +88,12 @@ if input_usuario:
         for m in st.session_state.messages:
             historial.append({"role": m["role"], "content": m["content"]})
 
-        # Lista de modelos gratuitos activos
+# Lista de modelos gratuitos activos en OpenRouter
         modelos_gratuitos = [
-            "google/gemini-2.0-flash-lite-001:free",
-            "meta-llama/llama-3.2-1b-instruct:free",
+            "deepseek/deepseek-r1:free",
+            "google/gemini-2.0-pro-exp-02-05:free",
+            "qwen/qwen-2.5-72b-instruct:free",
             "meta-llama/llama-3.1-8b-instruct:free",
-            "qwen/qwen-2.5-7b-instruct:free",
             "mistralai/mistral-7b-instruct:free"
         ]
 
