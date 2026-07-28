@@ -30,10 +30,14 @@ if not api_key:
     st.info("💡 Ingresa tu OpenRouter API Key en el panel izquierdo. Es gratuita en openrouter.ai")
     st.stop()
 
-# Cliente OpenRouter
+# Cliente OpenRouter con encabezados necesarios
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=api_key,
+    default_headers={
+        "HTTP-Referer": "https://streamlit.io",
+        "X-Title": "Simulador Call Center"
+    }
 )
 
 prompt_sistema = f"""
@@ -69,7 +73,6 @@ prompt_texto = st.chat_input("O escribe tu mensaje aquí...")
 input_usuario = None
 
 if audio_bytes:
-    # Nota: Aquí simulamos el envío inicial o captura de voz
     input_usuario = "Hola, buenas tardes, me comunico del centro de atención al cliente."
 
 if prompt_texto:
@@ -85,16 +88,18 @@ if input_usuario:
         for m in st.session_state.messages:
             historial.append({"role": m["role"], "content": m["content"]})
 
-        # Lista de modelos 100% gratuitos activos en OpenRouter
+        # Lista de modelos gratuitos activos
         modelos_gratuitos = [
             "google/gemini-2.0-flash-lite-001:free",
+            "meta-llama/llama-3.2-1b-instruct:free",
             "meta-llama/llama-3.1-8b-instruct:free",
-            "qwen/qwen-2.5-72b-instruct:free",
+            "qwen/qwen-2.5-7b-instruct:free",
             "mistralai/mistral-7b-instruct:free"
         ]
 
         respuesta_ia = None
-        
+        errores_detalle = []
+
         for modelo in modelos_gratuitos:
             try:
                 chat_completion = client.chat.completions.create(
@@ -102,9 +107,11 @@ if input_usuario:
                     messages=historial,
                 )
                 respuesta_ia = chat_completion.choices[0].message.content
-                break  # Si tuvo éxito, sale del bucle
-            except Exception:
-                continue  # Si falla un modelo, intenta con el siguiente de la lista
+                if respuesta_ia:
+                    break
+            except Exception as e:
+                errores_detalle.append(f"• `{modelo}`: {e}")
+                continue
 
         if respuesta_ia:
             st.markdown(respuesta_ia)
@@ -118,7 +125,9 @@ if input_usuario:
             st.audio(audio_fp, format='audio/mp3', autoplay=True)
             st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
         else:
-            st.error("❌ No se pudo obtener respuesta de los modelos gratuitos de OpenRouter. Revisa tu API Key.")
+            st.error("❌ No se pudo conectar con OpenRouter. Detalle del error recibido:")
+            for err in errores_detalle[:2]:
+                st.write(err)
 
 if st.button("🔴 Finalizar y Reiniciar Llamada"):
     st.session_state.messages = []
