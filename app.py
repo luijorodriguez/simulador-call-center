@@ -2,6 +2,8 @@ import streamlit as st
 from openai import OpenAI
 from gtts import gTTS
 import io
+import json
+import urllib.request
 from audio_recorder_streamlit import audio_recorder
 
 # Configuración de la página
@@ -9,6 +11,33 @@ st.set_page_config(page_title="Simulador de Call Center por Voz", page_icon="�
 
 st.title("🎙️ Simulador de Llamadas de Voz (Entrenamiento)")
 st.caption("Habla por el micrófono para simular la llamada telefónica en tiempo real.")
+
+# Función que consulta la lista de modelos GRATUITOS oficiales en vivo
+@st.cache_data(ttl=3600)
+def obtener_modelos_gratuitos_en_vivo():
+    try:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/models",
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            data_list = data.get("data", [])
+            
+            # Extraer solo los modelos que terminan exactamente en ':free'
+            modelos_free = [item["id"] for item in data_list if item.get("id", "").endswith(":free")]
+            
+            if modelos_free:
+                return modelos_free
+    except Exception:
+        pass
+    
+    # Respaldo en caso de fallo de conexión
+    return [
+        "meta-llama/llama-3.1-8b-instruct:free",
+        "mistralai/mistral-7b-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free"
+    ]
 
 # Sidebar - Configuración
 with st.sidebar:
@@ -88,14 +117,8 @@ if input_usuario:
         for m in st.session_state.messages:
             historial.append({"role": m["role"], "content": m["content"]})
 
-        # Lista de modelos 100% gratuitos activos
-        modelos_gratuitos = [
-            "deepseek/deepseek-r1:free",
-            "google/gemini-2.0-pro-exp-02-05:free",
-            "qwen/qwen-2.5-72b-instruct:free",
-            "meta-llama/llama-3.1-8b-instruct:free",
-            "mistralai/mistral-7b-instruct:free"
-        ]
+        # Consulta dinámica de modelos activos en vivo
+        modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
 
         respuesta_ia = None
         errores_detalle = []
@@ -125,8 +148,8 @@ if input_usuario:
             st.audio(audio_fp, format='audio/mp3', autoplay=True)
             st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
         else:
-            st.error("❌ No se pudo conectar con OpenRouter. Detalle:")
-            for err in errores_detalle[:2]:
+            st.error("❌ No se pudo conectar con los modelos de OpenRouter. Detalle:")
+            for err in errores_detalle[:3]:
                 st.write(err)
 
 if st.button("🔴 Finalizar y Reiniciar Llamada"):
