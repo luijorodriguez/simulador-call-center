@@ -1,557 +1,284 @@
 import streamlit as st
-from openai import OpenAI
-from gtts import gTTS
-import io
-import json
+import pandas as pd
 import random
-import urllib.request
-import speech_recognition as sr
-from audio_recorder_streamlit import audio_recorder
+import json
+import os
+from openai import OpenAI
 
-# Configuración de la página
-st.set_page_config(
-    page_title="Simulador Call Center Pro", 
-    page_icon="🎙️", 
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Simulador de Cobranzas - PRC / Cashea", layout="wide", initial_sidebar_state="collapsed")
 
-# ---------------------------------------------------------
-# BANCO DE 30 CASOS DE ENTRENAMIENTO PARA CALL CENTER
-# ---------------------------------------------------------
-CASOS_DATABASE = [
-    {
-        "id": 1,
-        "categoria": "Facturación",
-        "titulo": "Cobro no reconocido de $50",
-        "contexto": "El cliente llama porque ve un cobro no reconocido de $50 en su tarjeta de crédito. El operador debe solicitar cédula, validar identidad, mostrar empatía y aplicar el protocolo de reversión si es menor a $100."
-    },
-    {
-        "id": 2,
-        "categoria": "Soporte Técnico",
-        "titulo": "Falla intermitente en servicio de Internet",
-        "contexto": "El cliente lleva 3 días con Internet lento e intermitente. El operador debe validar datos del titular, guiar en el reinicio del módem (físico), verificar el estado de la red en zona y agendar visita técnica si no se soluciona."
-    },
-    {
-        "id": 3,
-        "categoria": "Retención y Cancelaciones",
-        "titulo": "Solicitud de cancelación por aumento de tarifa",
-        "contexto": "El cliente llama muy molesto exigiendo cancelar su plan mensual porque le subieron la tarifa. El operador debe mantener la calma, escuchar activamente, validar identidad y ofrecer un descuento de fidelización del 20% durante 6 meses antes de proceder con la baja."
-    },
-    {
-        "id": 4,
-        "categoria": "Facturación",
-        "titulo": "Doble débito en cuenta bancaria",
-        "contexto": "El cliente afirma que le descontaron dos veces la mensualidad de este mes. El operador debe solicitar la fecha exacta de las transacciones, pedir la cédula, revisar el sistema de cobros y generar la orden de devolución en 24-48 horas hábiles."
-    },
-    {
-        "id": 5,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Producto o pedido retrasado",
-        "contexto": "El cliente compró un equipo online que debía llegar hace 2 días y no ha recibido actualizaciones. El operador debe pedir el número de pedido o cédula, rastrear la guía en el sistema logístico, dar estatus claro y brindar disculpa corporativa ofreciendo un bono de envío gratis futuro."
-    },
-    {
-        "id": 6,
-        "categoria": "Seguridad",
-        "titulo": "Bloqueo de clave de banca en línea / app",
-        "contexto": "El usuario bloqueó su usuario por introducir mal la clave tres veces. El operador debe hacer 3 preguntas estrictas de seguridad (cédula, fecha de nacimiento, últimos 4 dígitos de cuenta/tarjeta) para proceder al desbloqueo y envío de clave temporal."
-    },
-    {
-        "id": 7,
-        "categoria": "Facturación",
-        "titulo": "Cobro excesivo en servicio Roaming Internacional",
-        "contexto": "El cliente viajó al exterior y recibió una factura de $300 por consumo de datos involuntario. El operador debe explicar amablemente el consumo según registro del sistema, pero ofrecer un ajuste especial a plan viajero reducido si no fue informado previamente."
-    },
-    {
-        "id": 8,
-        "categoria": "Soporte Técnico",
-        "titulo": "Línea móvil sin señal / SIM Inactiva",
-        "contexto": "El cliente compró un chip nuevo pero su teléfono dice 'Sin Servicio'. El operador debe confirmar número de Cédula e ICCID del chip, verificar si la línea está activa en plataforma y guiar al usuario para configurar el APN de la red."
-    },
-    {
-        "id": 9,
-        "categoria": "Seguridad / Reclamos",
-        "titulo": "Reporte de extravío o robo de tarjeta",
-        "contexto": "El cliente llama alarmado porque perdió su billetera con sus tarjetas. El operador debe priorizar la llamada, pedir número de cédula de inmediato, realizar la suspensión definitiva de los plásticos y emitir la orden de reposición."
-    },
-    {
-        "id": 10,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Cambio de dirección de entrega de pedido en tránsito",
-        "contexto": "El usuario se mudó repentinamente y requiere cambiar la dirección de un envío que sale hoy. El operador debe validar titularidad del pedido, verificar si la guía ya fue recolectada por la agencia y gestionar la modificación en el sistema antes del reparto."
-    },
-    {
-        "id": 11,
-        "categoria": "Ventas y Upgrades",
-        "titulo": "Solicitud de reducción de plan (Downgrade)",
-        "contexto": "El cliente quiere bajarse al plan más económico porque recortó sus gastos personales. El operador debe evaluar su consumo actual, explicar los beneficios que perdería de forma empática y ofrecer un paquete ajustado a sus necesidades."
-    },
-    {
-        "id": 12,
-        "categoria": "Soporte Técnico",
-        "titulo": "Decodificador de TV sin señal (pantalla negra/roja)",
-        "contexto": "El usuario no puede ver televisión y le aparece error de señal en pantalla. El operador debe guiarlo paso a paso para verificar las conexiones de cable coaxial/HDMI y realizar un reenvío de señal (refresh) desde la consola."
-    },
-    {
-        "id": 13,
-        "categoria": "Facturación",
-        "titulo": "Aplicación de código de descuento no reflejado",
-        "contexto": "El cliente realizó una compra ingresando un cupón de 15% de descuento, pero la factura llegó por el precio completo. El operador debe pedir el código del cupón, validar la vigencia de la promoción y emitir una nota de crédito por el excedente."
-    },
-    {
-        "id": 14,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Reclamo por mala atención en sucursal presencial",
-        "contexto": "El cliente está sumamente molesto por el trato que recibió en una tienda física hace unas horas. El operador debe aplicar escucha activa, ofrecer disculpas a nombre de la empresa, tomar el reporte de queja detallado y remitirlo a gestión humana."
-    },
-    {
-        "id": 15,
-        "categoria": "Cobranzas",
-        "titulo": "Solicitud de prórroga o convenio de pago por mora",
-        "contexto": "El cliente tiene 2 meses de mora por desempleo y teme el corte definitivo del servicio. El operador debe validar sus datos, verificar antigüedad como cliente y ofrecer un convenio de pago diferido en 3 cuotas sin intereses."
-    },
-    {
-        "id": 16,
-        "categoria": "Garantías",
-        "titulo": "Producto entregado defectuoso / averiado",
-        "contexto": "El cliente recibió un electrodoméstico que no enciende. El operador debe solicitar cédula, número de factura, tomar reporte del estado del empaque y generar la guía de recolección gratuita para revisión técnica o reemplazo."
-    },
-    {
-        "id": 17,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Actualización de datos personales y correo electrónico",
-        "contexto": "El cliente cambió de correo y número telefónico y no recibe sus facturas digitales. El operador debe efectuar la validación estricta de seguridad previa antes de modificar el correo electrónico de contacto en la base de datos."
-    },
-    {
-        "id": 18,
-        "categoria": "Facturación",
-        "titulo": "Cargo por mora indebido cobrado al cliente",
-        "contexto": "Al cliente le cobraron recargo por pago tardío, pero él pagó antes de la fecha límite por transferencia. El operador debe solicitar el número de referencia del comprobante de pago, verificar en sistema y anular el recargo indebido."
-    },
-    {
-        "id": 19,
-        "categoria": "Retención y Cancelaciones",
-        "titulo": "Cancelación por mudanza a zona sin cobertura",
-        "contexto": "El cliente debe dar de baja su servicio de fibra óptica porque se traslada a un sector rural sin cobertura. El operador debe confirmar la falta de cobertura en mapa, explicar los trámites de devolución de equipos y no cobrar penalidad por causa justificada."
-    },
-    {
-        "id": 20,
-        "categoria": "Soporte Técnico",
-        "titulo": "Falla al intentar realizar pagos por la app móvil",
-        "contexto": "La app del cliente se cierra o arroja 'Error 500' cada vez que intenta pagar la factura. El operador debe tomar captura/detalle del error, recomendar borrar caché de la app y elevar la incidencia al departamento de TI."
-    },
-    {
-        "id": 21,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Consulta de estatus de trámite o reclamo anterior",
-        "contexto": "El cliente llama para conocer el avance de un caso ingresado hace 5 días hábiles. El operador debe solicitar el número de ticket o cédula, consultar el sistema de tickets CRM y comunicarle el estatus exacto y tiempos restantes."
-    },
-    {
-        "id": 22,
-        "categoria": "Fidelización",
-        "titulo": "Consulta y canje de puntos del programa de lealtad",
-        "contexto": "El cliente quiere saber cuántos puntos acumulados tiene y cómo cambiarlos por saldo o productos. El operador debe revisar la cuenta, informarle el saldo disponible y guiarlo en el procedimiento de canje inmediato."
-    },
-    {
-        "id": 23,
-        "categoria": "Facturación",
-        "titulo": "Inconformidad con cobro de suscripción no autorizada",
-        "contexto": "Aparece un seguro asistencial adicional de $5/mes que el cliente afirma nunca haber contratado. El operador debe pedir cédula, dar de baja inmediata al servicio adicional y tramitar el reembolso de las cuotas cobradas."
-    },
-    {
-        "id": 24,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Solicitud de reagendamiento de visita técnica",
-        "contexto": "El técnico iba a ir hoy pero el usuario tuvo una emergencia y no estará en casa. El operador debe verificar la agenda disponible en el sistema y programar la visita en un rango horario conveniente para el cliente."
-    },
-    {
-        "id": 25,
-        "categoria": "Soporte Técnico",
-        "titulo": "Problemas de sincronización o emparejamiento",
-        "contexto": "El usuario no logra conectar su nuevo smartwatch o equipo inteligente con la plataforma. El operador debe mantener la paciencia y guiar paso a paso el reinicio de Bluetooth y emparejamiento desde los ajustes."
-    },
-    {
-        "id": 26,
-        "categoria": "Cobranzas",
-        "titulo": "Confirmación de recepción de pago no reflejado en sistema",
-        "contexto": "El usuario pagó hace 24 horas pero le sigue apareciendo el servicio suspendido por falta de pago. El operador debe pedir el número de depósito o transferencia, validar la conciliación manual y habilitar el reconexión de emergencia."
-    },
-    {
-        "id": 27,
-        "categoria": "Servicio al Cliente",
-        "titulo": "Solicitud de envío de factura detallada en PDF",
-        "contexto": "El cliente requiere la factura desglosada del mes pasado para trámites de impuestos en su empresa. El operador debe confirmar cédula/RIF y correo destino para hacer el reenvío automático del PDF corporativo."
-    },
-    {
-        "id": 28,
-        "categoria": "Ventas",
-        "titulo": "Información y requisitos para contratación de nuevo servicio",
-        "contexto": "Un usuario interesado llama para averiguar qué requisitos necesita para contratar una línea corporativa. El operador debe brindar la información de tarifas de forma clara, solicitar datos de contacto y generar un prospecto de venta."
-    },
-    {
-        "id": 29,
-        "categoria": "Seguridad",
-        "titulo": "Notificación de intento de suplantación / Phishing",
-        "contexto": "El cliente recibió un SMS pidiendo sus claves a nombre de la empresa y quiere verificar si fue real. El operador debe calmar al cliente, confirmar que la empresa nunca pide claves, registrar el número emisor para el equipo de ciberseguridad."
-    },
-    {
-        "id": 30,
-        "categoria": "Retención y Cancelaciones",
-        "titulo": "Cliente insatisfecho con la velocidad contratada vs real",
-        "contexto": "El cliente contratÓ 300 Mbps pero dice que los test de velocidad solo le marcan 50 Mbps por WiFi. El operador debe explicar empáticamente la diferencia entre prueba por cable vs WiFi, realizar pruebas de canal y ofrecer soporte técnico avanzado antes de considerar baja."
-    }
+# Inicialización de la API de OpenAI
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", "TU_OPENAI_API_KEY_AQUI"))
+
+# --- MATRIZ DE LOS 30 CASOS DE CLIENTES ---
+CASOS_CLIENTES = [
+    {"id": 1, "titulo": "Receptivo por recordatorio", "desc": "Tenía el dinero pero olvidó la fecha. Quiere pagar hoy mismo."},
+    {"id": 2, "titulo": "Interesado en Creo en Ti", "desc": "Quiere pagar hoy solo si le confirman las 6 cuotas e inicial reducida."},
+    {"id": 3, "titulo": "Falla en plataforma de pago", "desc": "Intentó pagar y la App le dio error. Busca ayuda para completar el pago."},
+    {"id": 4, "titulo": "Cobró pero incompleto", "desc": "Tiene el 50% de la deuda hoy y el resto en 7 días. Busca negociación."},
+    {"id": 5, "titulo": "Situación de contingencia", "desc": "Afectado por lluvias/siniestro. Requiere validación del protocolo de contingencia."},
+    {"id": 6, "titulo": "Cliente Nivel Alto molesto", "desc": "Molesto por estar en mora por pocos dólares. Cede rápido si no le cobran fees extra."},
+    {"id": 7, "titulo": "Esperando quincena", "desc": "Objeción: 'Pago el 30'. Exige al agente rebatir al menos 2 veces con opciones de abono."},
+    {"id": 8, "titulo": "Desempleo reciente", "desc": "Sin ingresos fijos. Se opone a pagar el total y propone fechas muy lejanas."},
+    {"id": 9, "titulo": "Gasto médico imprevisto", "desc": "Afectado emocionalmente. Exige empatía pero firmeza para lograr un abono parcial."},
+    {"id": 10, "titulo": "Evasivo / Inseguro", "desc": "Respuestas vagamente afirmativas ('Déjame ver', 'Si me pagan sí'). Exige presionar compromiso."},
+    {"id": 11, "titulo": "Solicita descuento de Fee", "desc": "Insiste en que no pagará los $4 de indemnización por mora."},
+    {"id": 12, "titulo": "Promesa de pago incumplida", "desc": "Ya incumplió una fecha previa. Actitud a la defensiva y desconfiada."},
+    {"id": 13, "titulo": "Prioriza otras deudas", "desc": "Dice que el alquiler y tarjetas son prioridad antes que la app Cashea."},
+    {"id": 14, "titulo": "Petición de pago en efectivo", "desc": "Quiere pagar en dólares en efectivo en tienda física, desconoce canales digitales."},
+    {"id": 15, "titulo": "Reclamo por producto defectuoso", "desc": "No quiere pagar porque el comercio no le dio garantía sobre lo comprado."},
+    {"id": 16, "titulo": "Molesto por llamadas", "desc": "Agresivo diciendo que lo llaman demasiado. Pide que no molesten más."},
+    {"id": 17, "titulo": "Cliente ocupado / Cortante", "desc": "Dice estar manejando o en reunión. Pone a prueba el control de llamada del agente."},
+    {"id": 18, "titulo": "Reclamo por línea suspendida", "desc": "Molesto porque no le dejan comprar más a pesar de tener una sola cuota vencida."},
+    {"id": 19, "titulo": "Asegura haber pagado", "desc": "Afirma que el pago se hizo pero no se refleja en la app (exige comprobante)."},
+    {"id": 20, "titulo": "Silencios prolongados", "desc": "Realiza pausas de 15 segundos antes de responder para probar la paciencia del agente."},
+    {"id": 21, "titulo": "Postura rígida / Negativa", "desc": "'No voy a pagar hasta el mes que viene y hagan lo que quieran'."},
+    {"id": 22, "titulo": "Desconfiado de estafa", "desc": "Teme que la llamada sea una estafa. Pide validación estricta de credenciales de PRC y Cashea."},
+    {"id": 23, "titulo": "Tercero: Hermano (Paga con dinero propio)", "desc": "Atiende el hermano. Si el agente le pregunta si pagará con SU PROPIO dinero, dice que SÍ y acepta negociar."},
+    {"id": 24, "titulo": "Tercero: Familiar (Paga con dinero del titular)", "desc": "Atiende familiar. Dice que paga con dinero que el titular le envía. Si el agente le da detalles de la cuenta sabiendo esto, comete ERRORES CRÍTICOS."},
+    {"id": 25, "titulo": "Tercero: Esposo/a (Finanzas compartidas)", "desc": "Atiende el cónyuge. Aclara que pagan entre los dos (dinero compartido). Se puede brindar información y negociar."},
+    {"id": 26, "titulo": "Tercero: Número equivocado", "desc": "Afirma no conocer al titular. El agente debe desvincular sin dar datos de deuda."},
+    {"id": 27, "titulo": "Tercero: Compañero de trabajo", "desc": "Atiende en teléfono laboral. El agente debe cuidar la confidencialidad estricta."},
+    {"id": 28, "titulo": "Tercero: Menor de edad", "desc": "Atiende un niño/joven. El agente debe finalizar de inmediato sin dar información."},
+    {"id": 29, "titulo": "Tercero: Amigo dispuesto (Propio dinero)", "desc": "Amigo del titular. Solo si el agente valida que pagará con su dinero propio procede la información."},
+    {"id": 30, "titulo": "Tercero: Titular fuera del país (Dinero remoto)", "desc": "Notifica que el titular está fuera y le mandará el dinero a él. Al ser dinero del titular, NO se le debe dar información confidencial."}
 ]
 
-# ---------------------------------------------------------
-# ESTILOS CSS
-# ---------------------------------------------------------
-st.markdown("""
-    <style>
-    .stApp { background-color: #f4f6f9; }
-    .main-header {
-        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-        padding: 20px;
-        border-radius: 12px;
-        color: white;
-        text-align: center;
-        margin-bottom: 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    .main-header h1 { color: white !important; margin: 0; font-size: 1.8rem; }
-    .agent-bar {
-        background: white;
-        padding: 12px 20px;
-        border-radius: 8px;
-        border-left: 5px solid #2a5298;
-        margin-bottom: 15px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-    }
-    .case-card {
-        background: #eef2f7;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #d0d7de;
-        margin-bottom: 15px;
-    }
-    .mic-container {
-        background: white;
-        padding: 18px;
-        border-radius: 12px;
-        text-align: center;
-        border: 1px solid #e1e8ed;
-        margin-bottom: 15px;
-    }
-    .report-card {
-        background-color: #ffffff;
-        border-left: 5px solid #28a745;
-        padding: 20px;
-        border-radius: 8px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    }
-    </style>
-""", unsafe_allow_html=True)
+# --- CARGA DE DATOS ---
+@st.cache_data
+def cargar_datos_excel():
+    try:
+        df = pd.read_excel("data para clientes simulador.xlsx")
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar el archivo Excel: {e}")
+        return None
 
-# Inicializar estados de la sesión
+# --- INICIALIZACIÓN DE ESTADOS ---
+if "pantalla" not in st.session_state:
+    st.session_state.pantalla = "login"
 if "agente_nombre" not in st.session_state:
     st.session_state.agente_nombre = ""
 if "agente_cedula" not in st.session_state:
     st.session_state.agente_cedula = ""
-if "registrado" not in st.session_state:
-    st.session_state.registrado = False
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "evaluado" not in st.session_state:
-    st.session_state.evaluado = False
-if "evaluacion_texto" not in st.session_state:
-    st.session_state.evaluacion_texto = ""
-if "casos_usados" not in st.session_state:
-    st.session_state.casos_usados = []
+if "modo_gestion" not in st.session_state:
+    st.session_state.modo_gestion = ""
+if "cliente_actual" not in st.session_state:
+    st.session_state.cliente_actual = None
 if "caso_actual" not in st.session_state:
     st.session_state.caso_actual = None
+if "mensajes" not in st.session_state:
+    st.session_state.mensajes = []
 
-# Funciones auxiliares
-def seleccionar_nuevo_caso():
-    casos_disponibles = [c for c in CASOS_DATABASE if c["id"] not in st.session_state.casos_usados]
-    if not casos_disponibles:
-        st.session_state.casos_usados = []  # Reiniciar si completó los 30 casos
-        casos_disponibles = CASOS_DATABASE
+# ==========================================
+# PANTALLA 1: REGISTRO Y CANAL
+# ==========================================
+if st.session_state.pantalla == "login":
+    st.markdown("<h1 style='text-align: center;'>🎯 Simulador de Cobranzas</h1>", unsafe_allow_html=True)
+    st.markdown("<h3 style='text-align: center; color: #555;'>PRC / Cashea - Plataforma de Entrenamiento</h3>", unsafe_allow_html=True)
+    st.markdown("---")
     
-    caso = random.choice(casos_disponibles)
-    st.session_state.casos_usados.append(caso["id"])
-    st.session_state.caso_actual = caso
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("form_inicio"):
+            st.subheader("📋 Registro del Agente")
+            nombre = st.text_input("Nombre y Apellido del Agente:")
+            cedula = st.text_input("Cédula de Identidad:")
+            modo = st.radio("Selecciona el Canal de Gestión:", ["🎙️ Modo Voz", "💬 Modo Chat"])
+            
+            btn_iniciar = st.form_submit_button("🚀 Iniciar Simulación")
 
-def transcribir_audio(audio_bytes):
-    r = sr.Recognizer()
-    audio_file = io.BytesIO(audio_bytes)
-    try:
-        with sr.AudioFile(audio_file) as source:
-            audio_data = r.record(source)
-            return r.recognize_google(audio_data, language="es-ES")
-    except sr.UnknownValueError:
-        st.warning("⚠️ Audio no reconocido. Intenta hablar más claro.")
-        return None
-    except Exception as e:
-        st.error(f"❌ Error de audio: {e}")
-        return None
-
-@st.cache_data(ttl=3600)
-def obtener_modelos_gratuitos_en_vivo():
-    try:
-        req = urllib.request.Request(
-            "https://openrouter.ai/api/v1/models",
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            data = json.loads(response.read().decode())
-            data_list = data.get("data", [])
-            modelos_free = [item["id"] for item in data_list if item.get("id", "").endswith(":free")]
-            if modelos_free:
-                return modelos_free
-    except Exception:
-        pass
-    
-    return [
-        "meta-llama/llama-3.1-8b-instruct:free",
-        "mistralai/mistral-7b-instruct:free",
-        "qwen/qwen-2.5-72b-instruct:free"
-    ]
-
-# Encabezado
-st.markdown("""
-    <div class="main-header">
-        <h1>🎙️ Simulador de Call Center & Auditoría de Calidad</h1>
-        <p>Sistema de Entrenamiento Interactivo por Voz</p>
-    </div>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------------------------
-# DETECCIÓN INTELIGENTE DE API KEY
-# ---------------------------------------------------------
-api_key = ""
-if "OPENROUTER_API_KEY" in st.secrets and st.secrets["OPENROUTER_API_KEY"]:
-    api_key = st.secrets["OPENROUTER_API_KEY"]
-else:
-    with st.sidebar:
-        api_key_input = st.text_input("OpenRouter API Key:", type="password")
-        api_key = api_key_input.strip() if api_key_input else ""
-
-if not api_key:
-    st.info("💡 Por favor, ingresa tu API Key para comenzar la simulación.")
-    st.stop()
-
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=api_key,
-    default_headers={"HTTP-Referer": "https://streamlit.io", "X-Title": "Simulador Call Center"}
-)
-
-# ---------------------------------------------------------
-# ETAPA 1: REGISTRO DEL AGENTE
-# ---------------------------------------------------------
-if not st.session_state.registrado:
-    st.subheader("👤 Registro del Agente para la Sesión")
-    with st.form("form_registro"):
-        nombre = st.text_input("Nombre y Apellido del Agente:")
-        cedula = st.text_input("Número de Cédula / Identificación:")
-        btn_ingresar = st.form_submit_button("🚀 Iniciar Sesión de Práctica", type="primary", use_container_width=True)
-        
-        if btn_ingresar:
-            if nombre.strip() and cedula.strip():
-                st.session_state.agente_nombre = nombre.strip()
-                st.session_state.agente_cedula = cedula.strip()
-                st.session_state.registrado = True
-                seleccionar_nuevo_caso()
-                st.rerun()
+        if btn_iniciar:
+            if not nombre.strip() or not cedula.strip():
+                st.error("⚠️ Por favor ingresa tu nombre y cédula para continuar.")
             else:
-                st.warning("⚠️ Debes completar tanto el Nombre como la Cédula para continuar.")
-
-# ---------------------------------------------------------
-# ETAPA 2: LLAMADA Y SIMULACIÓN EN CURSO
-# ---------------------------------------------------------
-else:
-    # Barra de información del Agente
-    st.markdown(f"""
-        <div class="agent-bar">
-            <strong>👤 Agente:</strong> {st.session_state.agente_nombre} &nbsp;|&nbsp; 
-            <strong>🪪 Cédula:</strong> {st.session_state.agente_cedula} &nbsp;|&nbsp;
-            <strong>📊 Casos Realizados:</strong> {len(st.session_state.casos_usados)} / 30
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Detalle del Caso Asignado al Azar
-    caso = st.session_state.caso_actual
-    st.markdown(f"""
-        <div class="case-card">
-            <span style="background-color:#2a5298; color:white; padding:3px 8px; border-radius:4px; font-size:0.8rem;">
-                Caso #{caso['id']} - {caso['categoria']}
-            </span>
-            <h4 style="margin: 8px 0 4px 0;">📋 {caso['titulo']}</h4>
-            <p style="margin:0; font-size:0.92rem; color:#444;"><strong>Instrucción / Situación:</strong> {caso['contexto']}</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Sidebar - Botón para reiniciar
-    with st.sidebar:
-        st.subheader("⚙️ Opciones de Sesión")
-        if st.button("🚪 Cambiar de Agente", use_container_width=True):
-            st.session_state.registrado = False
-            st.session_state.agente_nombre = ""
-            st.session_state.agente_cedula = ""
-            st.session_state.messages = []
-            st.session_state.evaluado = False
-            st.session_state.casos_usados = []
-            st.rerun()
-
-    prompt_sistema = f"""
-    Eres un cliente real que llama por teléfono a un call center de atención al cliente.
-    Tu situación y motivo de llamada es estrictamente el siguiente:
-    ---
-    {caso['contexto']}
-    ---
-    Instrucciones de actuación:
-    1. Actúa como un cliente real (puedes estar preocupado, confundido o molesto según el caso).
-    2. Mantén respuestas MUY BREVES (máximo 1 a 2 oraciones sencillas) para simular una llamada fluida.
-    3. No uses acotaciones ni texto entre paréntesis como (suspirando) o [enojado].
-    """
-
-    # Mostrar Historial de Chat
-    for message in st.session_state.messages:
-        avatar = "👨‍💼" if message["role"] == "user" else "🎧"
-        with st.chat_message(message["role"], avatar=avatar):
-            st.markdown(message["content"])
-
-    # SI AÚN NO SE HA AUDITADO LA LLAMADA
-    if not st.session_state.evaluado:
-        st.markdown('<div class="mic-container">', unsafe_allow_html=True)
-        st.write("🎙️ **Control de Audio (Tu Voz)**")
-        st.caption("Toca el micrófono para hablar y vuelve a tocarlo para detenerte:")
-        
-        audio_bytes = audio_recorder(
-            text="",
-            recording_color="#e74c3c",
-            neutral_color="#27ae60",
-            icon_size="2x"
-        )
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        prompt_texto = st.chat_input("O escribe tu mensaje aquí...")
-        input_usuario = None
-
-        if audio_bytes and ("last_audio" not in st.session_state or st.session_state.last_audio != audio_bytes):
-            st.session_state.last_audio = audio_bytes
-            with st.spinner("🎧 Transcribiendo audio..."):
-                input_usuario = transcribir_audio(audio_bytes)
-
-        if prompt_texto:
-            input_usuario = prompt_texto
-
-        if input_usuario:
-            st.session_state.messages.append({"role": "user", "content": input_usuario})
-            with st.chat_message("user", avatar="👨‍💼"):
-                st.markdown(input_usuario)
-
-            with st.chat_message("assistant", avatar="🎧"):
-                historial = [{"role": "system", "content": prompt_sistema}]
-                for m in st.session_state.messages:
-                    historial.append({"role": m["role"], "content": m["content"]})
-
-                modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
-                respuesta_ia = None
-
-                for modelo in modelos_gratuitos:
-                    try:
-                        chat_completion = client.chat.completions.create(
-                            model=modelo,
-                            messages=historial,
-                        )
-                        respuesta_ia = chat_completion.choices[0].message.content
-                        if respuesta_ia:
-                            break
-                    except Exception:
-                        continue
-
-                if respuesta_ia:
-                    st.markdown(respuesta_ia)
-                    tts = gTTS(text=respuesta_ia, lang='es')
-                    audio_fp = io.BytesIO()
-                    tts.write_to_fp(audio_fp)
-                    audio_fp.seek(0)
-                    st.audio(audio_fp, format='audio/mp3', autoplay=True)
-                    st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔴 Finalizar Llamada y Auditar Gestión", type="primary", use_container_width=True):
-            if len(st.session_state.messages) < 2:
-                st.warning("⚠️ Realiza al menos un intercambio de voz antes de solicitar la auditoría.")
-            else:
-                with st.spinner("📊 Generando reporte de auditoría personalizado..."):
-                    transcripcion = ""
-                    for msg in st.session_state.messages:
-                        rol = "OPERADOR" if msg["role"] == "user" else "CLIENTE"
-                        transcripcion += f"{rol}: {msg['content']}\n"
-
-                    prompt_evaluacion = f"""
-                    Eres un Auditor de Calidad Senior de Call Center.
-                    Evalúa la gestión del siguiente operador durante la llamada:
-
-                    INFORMACIÓN DEL AGENTE:
-                    - Nombre del Agente: {st.session_state.agente_nombre}
-                    - Cédula de Identidad: {st.session_state.agente_cedula}
-
-                    CASO EVALUADO:
-                    - Caso #{caso['id']}: {caso['titulo']} ({caso['categoria']})
-                    - Protocolo/Manual: {caso['contexto']}
-
-                    TRANSCRIPCIÓN COMPLETA DE LA LLAMADA:
-                    ---
-                    {transcripcion}
-                    ---
-
-                    Genera un informe pedagógico en español estructurado con el siguiente formato Markdown:
+                df = cargar_datos_excel()
+                if df is not None:
+                    cliente_row = df.sample(n=1).iloc[0].to_dict()
+                    caso_row = random.choice(CASOS_CLIENTES)
                     
-                    ## 📊 REPORTE DE AUDITORÍA DE CALIDAD
-                    **Agente:** {st.session_state.agente_nombre} | **Cédula:** {st.session_state.agente_cedula}  
-                    **Caso Evaluado:** #{caso['id']} - {caso['titulo']}
+                    st.session_state.agente_nombre = nombre
+                    st.session_state.agente_cedula = cedula
+                    st.session_state.modo_gestion = modo
+                    st.session_state.cliente_actual = cliente_row
+                    st.session_state.caso_actual = caso_row
+                    st.session_state.mensajes = []
+                    
+                    st.session_state.pantalla = "crm"
+                    st.rerun()
 
-                    ---
-                    ### 🏆 Nota Final: X / 10
-                    ### ✅ Aciertos del Operador
-                    ### ⚠️ Oportunidades de Mejora
-                    ### 📋 Cumplimiento de Protocolo
-                    ### 💡 Consejo Práctico para la Próxima Gestión
-                    """
+# ==========================================
+# PANTALLA 2: FICHA CRM Y SIMULACIÓN
+# ==========================================
+elif st.session_state.pantalla == "crm":
+    cliente = st.session_state.cliente_actual
+    caso = st.session_state.caso_actual
+    
+    st.markdown(f"**👤 Agente:** {st.session_state.agente_nombre} (CI: {st.session_state.agente_cedula}) &nbsp;|&nbsp; **📱 Canal:** {st.session_state.modo_gestion}")
+    st.markdown("---")
+    
+    crm_html = f"""
+    <div style="background-color: #fdfdfd; border: 1px solid #e0e0e0; padding: 20px; border-radius: 8px; font-family: Arial, sans-serif; line-height: 1.8; font-size: 15px;">
+        <p style="margin: 4px 0;"><b>Nombre y Apellido:</b> &nbsp;&nbsp;&nbsp;&nbsp; {cliente.get('Nombre y Apellido', 'N/A')}</p>
+        <p style="margin: 4px 0;"><b>CI de identidad:</b> &nbsp;&nbsp;&nbsp;&nbsp; {cliente.get('CI de identidad', 'N/A')}</p>
+        <p style="margin: 4px 0;"><b>Correo electrónico:</b> &nbsp;&nbsp;&nbsp;&nbsp; {cliente.get('Correo electrónico', 'N/A')}</p>
+        <p style="margin: 4px 0;"><b>Teléfono:</b> &nbsp;&nbsp;&nbsp;&nbsp; {cliente.get('Teléfono', 'N/A')}</p>
+        <br>
+        <p style="margin: 4px 0;"><b>Cantidad de Cuotas Vencidas:</b> &nbsp;&nbsp;&nbsp;&nbsp; <b>1</b></p>
+        <p style="margin: 4px 0;"><b>Cantidad de Cuotas Preventivas:</b> &nbsp;&nbsp;&nbsp;&nbsp; <span style="color: #e67e22; font-weight: bold;">0</span></p>
+        <br>
+        <p style="margin: 4px 0;"><span style="color: #a93226; font-weight: bold;">Saldo Pendiente con Fee (Vencido):</span> &nbsp;&nbsp;&nbsp;&nbsp; <span style="color: #a93226; font-weight: bold;">{cliente.get('Saldo Pendiente con Fee (Vencido)', '0,00')} $</span></p>
+        <p style="margin: 4px 0;"><span style="color: #d4ac0d; font-weight: bold;">Saldo Pendiente (Preventivo):</span> &nbsp;&nbsp;&nbsp;&nbsp; <span style="color: #d4ac0d; font-weight: bold;">0,00 $</span></p>
+        <br>
+        <p style="margin: 4px 0;"><b>Monto en Bs con Fee (Vencido):</b> &nbsp;&nbsp;&nbsp;&nbsp; <span style="color: #e74c3c; font-weight: bold;">Bs. {round(float(str(cliente.get('Saldo Pendiente con Fee (Vencido)', 0)).replace(',', '.')) * 40, 2)}</span></p>
+        <br>
+        <p style="margin: 4px 0;"><span style="color: #27ae60; font-weight: bold;">Saldo Abonado:</span> &nbsp;&nbsp;&nbsp;&nbsp; <span style="color: #27ae60; font-weight: bold;">{cliente.get('Saldo Abonado', '0,00')} $</span></p>
+        <br>
+        <p style="margin: 4px 0;"><span style="color: #c0392b; font-weight: bold;">Días de Mora:</span> &nbsp;&nbsp;&nbsp;&nbsp; <span style="color: #c0392b; font-weight: bold;">{cliente.get('Dias en mora', 0)} días</span></p>
+    </div>
+    """
+    st.markdown(crm_html, unsafe_allow_html=True)
+    st.markdown("---")
+    
+    st.subheader(f"💬 Interacción de Cobranza ({st.session_state.modo_gestion})")
+    
+    for msg in st.session_state.mensajes:
+        if msg["role"] == "user":
+            st.chat_message("user").write(msg["content"])
+        elif msg["role"] == "assistant":
+            st.chat_message("assistant").write(msg["content"])
 
-                    modelos_gratuitos = obtener_modelos_gratuitos_en_vivo()
-                    evaluacion_res = None
+    prompt_agente = st.chat_input("Escribe tu intervención como agente de PRC/Cashea...")
+    
+    if prompt_agente:
+        st.session_state.mensajes.append({"role": "user", "content": prompt_agente})
+        st.chat_message("user").write(prompt_agente)
+        
+        system_prompt_cliente = f"""
+        [ROL DE CLIENTE/TERCERO SIMULADO - COBRANZA CASHEA]
+        Estás recibiendo un contacto de cobranza de PRC en representación de Cashea.
+        DATOS DE LA CUENTA:
+        - Nombre Titular: {cliente.get('Nombre y Apellido')}
+        - Cédula: {cliente.get('CI de identidad')}
+        - Días Mora: {cliente.get('Dias en mora')}
+        - Saldo Vencido: ${cliente.get('Saldo Pendiente con Fee (Vencido)')}
 
-                    for modelo in modelos_gratuitos:
-                        try:
-                            res = client.chat.completions.create(
-                                model=modelo,
-                                messages=[{"role": "user", "content": prompt_evaluacion}],
-                            )
-                            evaluacion_res = res.choices[0].message.content
-                            if evaluacion_res:
-                                break
-                        except Exception:
-                            continue
+        CASO ASIGNADO #{caso['id']}: {caso['titulo']}
+        COMPORTAMIENTO / REGLA DE PAGO: {caso['desc']}
 
-                    if evaluacion_res:
-                        st.session_state.evaluacion_texto = evaluacion_res
-                        st.session_state.evaluado = True
-                        st.rerun()
+        REGLA DE ORO DE TERCEROS:
+        - Si eres TERCERO y el agente pregunta si te haces cargo del pago, DEBES indicar de dónde proviene el dinero según tu caso:
+          a) Si pagas con TU PROPIO DINERO o DINERO COMPARTIDO (ej. Cónyuge): Confirmas que sí es tu dinero o compartido.
+          b) Si pagas con DINERO DEL TITULAR (ej. "Ella me lo manda desde afuera"): Aclaras que es dinero de ella.
+        - Si el agente NO te pregunta de quién es el dinero pero empieza a darte datos de la deuda (montos, días de mora), actúas normal pero el auditor lo penalizará.
 
-    # MODO MOSTRAR EVALUACIÓN Y SIGUIENTE CASO
-    else:
-        st.subheader("📋 Auditoría de Calidad Personalizada")
-        st.markdown(f'<div class="report-card">{st.session_state.evaluacion_texto}</div>', unsafe_allow_html=True)
+        INSTRUCCIONES GENERALES:
+        1. Habla en español venezolano cotidiano.
+        2. Mantén respuestas cortas y fluidas.
+        3. No rompas el personaje.
+        """
+        
+        api_messages = [{"role": "system", "content": system_prompt_cliente}] + st.session_state.mensajes
+        response = client.chat.completions.create(model="gpt-4o-mini", messages=api_messages, temperature=0.7)
+        
+        respuesta_cliente = response.choices[0].message.content
+        st.session_state.mensajes.append({"role": "assistant", "content": respuesta_cliente})
+        st.chat_message("assistant").write(respuesta_cliente)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔄 Iniciar Siguiente Caso (Aleatorio)", type="primary", use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.evaluado = False
-            st.session_state.evaluacion_texto = ""
-            if "last_audio" in st.session_state:
-                del st.session_state["last_audio"]
-            seleccionar_nuevo_caso()
-            st.rerun()
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("🔴 Finalizar y Evaluar Gestión", type="primary"):
+        st.session_state.pantalla = "evaluacion"
+        st.rerun()
+
+# ==========================================
+# PANTALLA 3: RESULTADOS Y AUDITORÍA DE CALIDAD
+# ==========================================
+elif st.session_state.pantalla == "evaluacion":
+    st.title("📊 Boletín de Evaluación de Calidad")
+    st.caption(f"Agente: {st.session_state.agente_nombre} | Canal: {st.session_state.modo_gestion}")
+    st.markdown("---")
+    
+    with st.spinner("El Auditor de Calidad está analizando la conversación con la matriz de evaluación..."):
+        transcripcion = "\n".join([f"{'AGENTE' if m['role']=='user' else 'CLIENTE'}: {m['content']}" for m in st.session_state.mensajes])
+        
+        system_prompt_auditor = f"""
+        Eres el Auditor de Calidad de PRC para la cuenta Cashea. Evalúa la siguiente conversación del agente {st.session_state.agente_nombre} en canal {st.session_state.modo_gestion}.
+
+        TRANSCRIPCIÓN:
+        {transcripcion}
+
+        REGLAS DE EVALUACIÓN Y ERRORES CRÍTICOS:
+        1. PROTOCOLO DE TERCEROS Y ORIGEN DE FONDOS (CRÍTICO):
+           - Si atendió un TERCERO, el agente debió preguntar si se hace cargo Y si pagará con SU PROPIO DINERO o DINERO COMPARTIDO (ej. Esposos).
+           - Si el tercero dijo que pagará con DINERO DEL TITULAR (ej. enviado del extranjero) o si el agente NUNCA preguntó el origen del dinero y aun así dio datos de la deuda (montos/mora): Marca ERROR CRÍTICO ("Divulgación no autorizada de deuda / Violación de protocolo de terceros").
+           - Si el tercero confirmó que paga con SU PROPIO DINERO o DINERO DE AMBOS (Cónyuges), es VÁLIDO dar información y negociar.
+
+        2. OTROS ERRORES CRÍTICOS:
+           - Falsificación de compromiso.
+           - Maltrato / Vocabulario no profesional.
+           - En Modo Chat: No identificarse con Nombre + Agencia (PRC) + Cashea en el primer mensaje.
+
+        3. ATRIBUTOS NO CRÍTICOS (0-100 pts):
+           - Apertura e Identificación (20 pts).
+           - Sondeo del Motivo y Tiempo de Impago (15 pts).
+           - Campaña Creo en Ti (20 pts).
+           - Manejo de Objeciones / Al menos 2 rebatimientos (25 pts).
+           - Consecuencias ($4 fee) y Beneficios (10 pts).
+           - Cierre Efectivo en una sola intervención con Fecha, Monto, Método y WhatsApp (10 pts).
+
+        Responde ÚNICAMENTE en formato JSON válido:
+        {{
+          "puntaje_total": 85,
+          "error_critico": false,
+          "motivo_error_critico": "Ninguno",
+          "desglose": {{
+             "apertura": "Comentario y nota",
+             "sondeo": "Comentario y nota",
+             "campana": "Comentario y nota",
+             "objeciones": "Comentario y nota",
+             "consecuencias_beneficios": "Comentario y nota",
+             "cierre": "Comentario y nota"
+          }},
+          "puntos_fuertes": ["Punto 1", "Punto 2"],
+          "oportunidades_mejora": ["Recomendación 1", "Recomendación 2"]
+        }}
+        """
+        
+        response_eval = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "system", "content": system_prompt_auditor}],
+            response_format={"type": "json_object"}
+        )
+        
+        resultado = json.loads(response_eval.choices[0].message.content)
+
+    col_score1, col_score2 = st.columns(2)
+    with col_score1:
+        st.metric("Puntuación General", f"{resultado.get('puntaje_total', 0)} / 100")
+    with col_score2:
+        if resultado.get("error_critico"):
+            st.error(f"🚨 ALERTA CRÍTICA: NO PASA\nMotivo: {resultado.get('motivo_error_critico')}")
+        else:
+            st.success("✅ GESTIÓN SIN ERRORES CRÍTICOS")
+
+    st.markdown("---")
+    st.subheader("📌 Desglose por Atributos")
+    for key, val in resultado.get("desglose", {}).items():
+        st.write(f"• **{key.capitalize().replace('_', ' ')}:** {val}")
+
+    st.markdown("---")
+    col_f, col_m = st.columns(2)
+    with col_f:
+        st.subheader("🌟 Puntos Fuertes")
+        for pf in resultado.get("puntos_fuertes", []):
+            st.write(f"✅ {pf}")
+    with col_m:
+        st.subheader("💡 Oportunidades de Mejora")
+        for om in resultado.get("oportunidades_mejora", []):
+            st.write(f"⚠️ {om}")
+
+    st.markdown("---")
+    if st.button("🔄 Iniciar Nueva Simulación"):
+        st.session_state.pantalla = "login"
+        st.rerun()
