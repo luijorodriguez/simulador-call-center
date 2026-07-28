@@ -10,7 +10,7 @@ st.set_page_config(page_title="Simulador de Call Center por Voz", page_icon="�
 st.title("🎙️ Simulador de Llamadas de Voz (Entrenamiento)")
 st.caption("Habla por el micrófono para simular la llamada telefónica en tiempo real.")
 
-# Sidebar
+# Sidebar - Configuración
 with st.sidebar:
     st.header("⚙️ Configuración del Simulador")
     api_key_input = st.text_input("OpenRouter API Key (sk-or-v1-...):", type="password")
@@ -63,13 +63,13 @@ audio_bytes = audio_recorder(
     icon_size="2x"
 )
 
-# Entrada por texto alternativa por si acaso
+# Entrada por texto alternativa
 prompt_texto = st.chat_input("O escribe tu mensaje aquí...")
 
 input_usuario = None
 
 if audio_bytes:
-    # Por ahora enviamos una señal de voz recibida
+    # Nota: Aquí simulamos el envío inicial o captura de voz
     input_usuario = "Hola, buenas tardes, me comunico del centro de atención al cliente."
 
 if prompt_texto:
@@ -85,15 +85,31 @@ if input_usuario:
         for m in st.session_state.messages:
             historial.append({"role": m["role"], "content": m["content"]})
 
-        try:
-            chat_completion = client.chat.completions.create(
-                model="meta-llama/llama-3.3-70b-instruct:free",
-                messages=historial,
-            )
-            respuesta_ia = chat_completion.choices[0].message.content
+        # Lista de modelos 100% gratuitos activos en OpenRouter
+        modelos_gratuitos = [
+            "google/gemini-2.0-flash-lite-001:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "qwen/qwen-2.5-72b-instruct:free",
+            "mistralai/mistral-7b-instruct:free"
+        ]
+
+        respuesta_ia = None
+        
+        for modelo in modelos_gratuitos:
+            try:
+                chat_completion = client.chat.completions.create(
+                    model=modelo,
+                    messages=historial,
+                )
+                respuesta_ia = chat_completion.choices[0].message.content
+                break  # Si tuvo éxito, sale del bucle
+            except Exception:
+                continue  # Si falla un modelo, intenta con el siguiente de la lista
+
+        if respuesta_ia:
             st.markdown(respuesta_ia)
 
-            # Voz de respuesta
+            # Convertir texto a voz hablada
             tts = gTTS(text=respuesta_ia, lang='es')
             audio_fp = io.BytesIO()
             tts.write_to_fp(audio_fp)
@@ -101,9 +117,8 @@ if input_usuario:
 
             st.audio(audio_fp, format='audio/mp3', autoplay=True)
             st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
-
-        except Exception as e:
-            st.error(f"Error al generar respuesta: {e}")
+        else:
+            st.error("❌ No se pudo obtener respuesta de los modelos gratuitos de OpenRouter. Revisa tu API Key.")
 
 if st.button("🔴 Finalizar y Reiniciar Llamada"):
     st.session_state.messages = []
