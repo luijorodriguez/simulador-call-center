@@ -30,7 +30,7 @@ if not api_key:
     st.info("💡 Ingresa tu OpenRouter API Key en el panel izquierdo. Es gratuita en openrouter.ai")
     st.stop()
 
-# Cliente OpenRouter con encabezados necesarios
+# Cliente OpenRouter
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=api_key,
@@ -88,7 +88,7 @@ if input_usuario:
         for m in st.session_state.messages:
             historial.append({"role": m["role"], "content": m["content"]})
 
-# Lista de modelos gratuitos activos en OpenRouter
+        # Lista de modelos 100% gratuitos activos
         modelos_gratuitos = [
             "deepseek/deepseek-r1:free",
             "google/gemini-2.0-pro-exp-02-05:free",
@@ -125,7 +125,7 @@ if input_usuario:
             st.audio(audio_fp, format='audio/mp3', autoplay=True)
             st.session_state.messages.append({"role": "assistant", "content": respuesta_ia})
         else:
-            st.error("❌ No se pudo conectar con OpenRouter. Detalle del error recibido:")
+            st.error("❌ No se pudo conectar con OpenRouter. Detalle:")
             for err in errores_detalle[:2]:
                 st.write(err)
 
